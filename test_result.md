@@ -86,9 +86,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "All backend API endpoints tested successfully"
-    - "All frontend functionality tested successfully"
-  stuck_tasks: []
+    - "Donation checkout testing - CRITICAL STRIPE API KEY ISSUE"
+  stuck_tasks:
+    - "Donation checkout testing - Invalid Stripe API key"
   test_all: true
   test_priority: "high_first"
 
