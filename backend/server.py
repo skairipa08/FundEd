@@ -53,25 +53,31 @@ async def health_check():
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
     """Handle Stripe webhooks."""
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    import stripe
     
     body = await request.body()
     signature = request.headers.get("Stripe-Signature")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
     
     stripe_api_key = os.environ.get("STRIPE_API_KEY")
     if not stripe_api_key:
         return {"error": "Stripe not configured"}
     
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=stripe_api_key, webhook_url=webhook_url)
+    stripe.api_key = stripe_api_key
     
     try:
-        webhook_response = await stripe_checkout.handle_webhook(body, signature)
+        # Verify webhook signature if secret is configured
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(body, signature, webhook_secret)
+        else:
+            event = stripe.Event.construct_from(
+                json.loads(body), stripe.api_key
+            )
         
-        # Process webhook event
-        if webhook_response.payment_status == "paid":
-            session_id = webhook_response.session_id
+        # Handle checkout.session.completed event
+        if event.type == "checkout.session.completed":
+            session = event.data.object
+            session_id = session.id
             
             # Update transaction status
             await db.payment_transactions.update_one(
