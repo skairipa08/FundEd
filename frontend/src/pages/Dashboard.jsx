@@ -349,7 +349,7 @@ const Dashboard = ({ user }) => {
                   <div>
                     <h3 className="text-lg font-bold text-yellow-800">Verification Pending</h3>
                     <p className="text-yellow-700">
-                      Your student profile is awaiting verification. You'll be able to create campaigns once verified.
+                      Your student profile is awaiting verification. You&apos;ll be able to create campaigns once verified.
                     </p>
                   </div>
                 </div>
