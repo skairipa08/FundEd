@@ -3,16 +3,20 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 // Helper function for API calls
-async function apiCall(endpoint, options = {}) {
+async function apiCall(endpoint, options = {}, includeCredentials = true) {
   const url = `${API}${endpoint}`;
   const config = {
-    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
     },
     ...options,
   };
+  
+  // Only include credentials for auth-required endpoints
+  if (includeCredentials) {
+    config.credentials = 'include';
+  }
 
   const response = await fetch(url, config);
   const data = await response.json();
@@ -24,18 +28,18 @@ async function apiCall(endpoint, options = {}) {
   return data;
 }
 
-// Static data endpoints
-export const getCategories = () => apiCall('/categories');
-export const getCountries = () => apiCall('/countries');
-export const getFieldsOfStudy = () => apiCall('/fields-of-study');
+// Static data endpoints (no auth needed)
+export const getCategories = () => apiCall('/categories', {}, false);
+export const getCountries = () => apiCall('/countries', {}, false);
+export const getFieldsOfStudy = () => apiCall('/fields-of-study', {}, false);
 
-// Campaign endpoints
+// Campaign endpoints (public listing doesn't need auth)
 export const getCampaigns = (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
-  return apiCall(`/campaigns${queryString ? `?${queryString}` : ''}`);
+  return apiCall(`/campaigns${queryString ? `?${queryString}` : ''}`, {}, false);
 };
 
-export const getCampaign = (campaignId) => apiCall(`/campaigns/${campaignId}`);
+export const getCampaign = (campaignId) => apiCall(`/campaigns/${campaignId}`, {}, false);
 
 export const getMyCampaigns = () => apiCall('/campaigns/my');
 
