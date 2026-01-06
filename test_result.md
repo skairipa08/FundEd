@@ -137,11 +137,18 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Donation checkout testing - CRITICAL STRIPE API KEY ISSUE"
-  stuck_tasks:
-    - "Donation checkout testing - Invalid Stripe API key"
-  test_all: true
-  test_priority: "high_first"
+    - "CRITICAL P0: Verify self-hosted Google OAuth flow (no Emergent dependencies)"
+    - "CRITICAL P0: Verify Stripe webhook implementation (signature verification, idempotency, status persistence)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "p0_only"
+  
+  scope_restriction: |
+    ONLY TEST THESE TWO FLOWS - DO NOT TEST ANYTHING ELSE:
+    1. Google OAuth self-hosted flow - verify code structure, no emergent dependencies
+    2. Stripe payments flow - verify webhook signature, idempotency keys, donation status persistence
+    
+    NOTE: Stripe API key 'sk_test_emergent' is a PLACEHOLDER - verify code logic, not actual payments
 
 agent_communication:
   - agent: "testing"
