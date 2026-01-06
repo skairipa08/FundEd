@@ -91,7 +91,7 @@ const DonateSuccess = () => {
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Issue</h1>
             <p className="text-gray-600 mb-6">
-              We couldn't verify your payment. If you were charged, please contact support.
+              We couldn&apos;t verify your payment. If you were charged, please contact support.
             </p>
             <Button onClick={() => navigate('/browse')} className="w-full">
               Back to Campaigns
