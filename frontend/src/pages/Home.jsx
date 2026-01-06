@@ -174,7 +174,7 @@ const Home = () => {
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">Support By Category</h2>
-            <p className="text-lg text-gray-600">Choose the type of support you'd like to provide</p>
+            <p className="text-lg text-gray-600">Choose the type of support you&apos;d like to provide</p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {categories.map((category) => (
