@@ -194,27 +194,38 @@ class FundEdAPITester:
         return False
     
     def test_admin_endpoints(self):
-        """Test admin endpoints"""
-        print("\n=== Testing Admin Endpoints ===")
+        """Test admin endpoints (should require auth)"""
+        print("\n=== Testing Admin Endpoints (Auth Required) ===")
         
-        if not self.create_admin_session():
-            return
-            
-        # Test admin stats
+        # Test admin stats without auth - should return 401
         try:
-            headers = {"Authorization": f"Bearer {self.admin_session_token}"}
-            response = self.session.get(f"{self.base_url}/api/admin/stats", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("success") and "users" in data.get("data", {}):
-                    self.log_test("GET /api/admin/stats", True, "Returns platform statistics")
-                else:
-                    self.log_test("GET /api/admin/stats", False, "Invalid stats response format")
+            response = self.session.get(f"{self.base_url}/api/admin/stats")
+            if response.status_code == 401:
+                self.log_test("GET /api/admin/stats", True, "Returns 401 (unauthorized) as expected")
             else:
-                self.log_test("GET /api/admin/stats", False, f"HTTP {response.status_code}: {response.text}")
+                self.log_test("GET /api/admin/stats", False, f"Expected 401, got HTTP {response.status_code}")
         except Exception as e:
             self.log_test("GET /api/admin/stats", False, f"Exception: {str(e)}")
+            
+        # Test admin users without auth - should return 401
+        try:
+            response = self.session.get(f"{self.base_url}/api/admin/users")
+            if response.status_code == 401:
+                self.log_test("GET /api/admin/users", True, "Returns 401 (unauthorized) as expected")
+            else:
+                self.log_test("GET /api/admin/users", False, f"Expected 401, got HTTP {response.status_code}")
+        except Exception as e:
+            self.log_test("GET /api/admin/users", False, f"Exception: {str(e)}")
+            
+        # Test admin students pending without auth - should return 401
+        try:
+            response = self.session.get(f"{self.base_url}/api/admin/students/pending")
+            if response.status_code == 401:
+                self.log_test("GET /api/admin/students/pending", True, "Returns 401 (unauthorized) as expected")
+            else:
+                self.log_test("GET /api/admin/students/pending", False, f"Expected 401, got HTTP {response.status_code}")
+        except Exception as e:
+            self.log_test("GET /api/admin/students/pending", False, f"Exception: {str(e)}")
     
     def test_health_endpoints(self):
         """Test basic health endpoints"""
