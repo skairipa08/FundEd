@@ -1,7 +1,7 @@
 # FundEd Production API Test Results
 
 **Test Date:** 2026-01-06  
-**Base URL:** https://funded.preview.emergentagent.com  
+**Base URL:** https://studentsupport-10.preview.emergentagent.com  
 **Total Tests:** 18  
 **Passed:** 17  
 **Failed:** 1  
@@ -80,7 +80,7 @@ The FundEd API is **94.4% functional** with all core endpoints working correctly
 
 ## Test Environment Details
 
-- **Production URL:** https://funded.preview.emergentagent.com
+- **Production URL:** https://studentsupport-10.preview.emergentagent.com
 - **API Version:** 2.0.0
 - **Database:** Healthy (MongoDB connection working)
 - **CORS:** Configured for production

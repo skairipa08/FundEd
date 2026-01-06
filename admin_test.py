@@ -7,7 +7,7 @@ Tests admin endpoints with proper authentication
 import requests
 import json
 
-BASE_URL = "https://funded.preview.emergentagent.com"
+BASE_URL = "https://studentsupport-10.preview.emergentagent.com"
 ADMIN_SESSION_TOKEN = "test_admin_session_1767720231580"
 
 def test_admin_endpoints():

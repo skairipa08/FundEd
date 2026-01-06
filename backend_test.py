@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Base URL from the review request
-BASE_URL = "https://funded.preview.emergentagent.com"
+BASE_URL = "https://studentsupport-10.preview.emergentagent.com"
 
 class FundEdAPITester:
     def __init__(self):
@@ -156,7 +156,7 @@ class FundEdAPITester:
             "donor_name": "Test Donor",
             "donor_email": "test@example.com",
             "anonymous": False,
-            "origin_url": "https://funded.preview.emergentagent.com"
+            "origin_url": "https://studentsupport-10.preview.emergentagent.com"
         }
         
         try:
