@@ -354,8 +354,11 @@ class FundEdAPITester:
         self.test_health_endpoints()
         self.test_static_data_endpoints()
         self.test_campaign_endpoints()
-        self.test_donation_checkout()
+        self.test_auth_endpoints()
         self.test_admin_endpoints()
+        self.test_stripe_webhook()
+        self.test_donation_validation()
+        self.test_donation_checkout()
         
         # Summary
         print("\n" + "=" * 60)
