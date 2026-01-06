@@ -8,6 +8,7 @@ import CampaignDetail from './pages/CampaignDetail';
 import CreateCampaign from './pages/CreateCampaign';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import DonateSuccess from './pages/DonateSuccess';
 import { Toaster } from './components/ui/toaster';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
