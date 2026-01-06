@@ -37,15 +37,18 @@ backend:
 
   - task: "Donation checkout testing"
     implemented: true
-    working: true
+    working: false
     file: "backend/routes/donations.py"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
       - working: true
         agent: "testing"
         comment: "✅ CRITICAL: Donation checkout working correctly - POST /api/donations/checkout returns valid Stripe checkout URL with session_id"
+      - working: false
+        agent: "testing"
+        comment: "🚨 CRITICAL FAILURE: POST /api/donations/checkout returning HTTP 400 'Invalid API Key provided: sk_test_****gent'. Current Stripe API key 'sk_test_emergent' in backend/.env is incomplete/invalid. All other functionality working. Root cause: Invalid/incomplete Stripe test API key after emergentintegrations dependency removal. Solution: Replace with valid Stripe test API key from Stripe Dashboard."
 
   - task: "Admin endpoints testing"
     implemented: true
