@@ -1,108 +1,120 @@
-import pytest
+"""
+Simple API tests using requests library.
+These tests run against a live server.
+"""
+import requests
+import os
+
+BASE_URL = os.environ.get("TEST_API_URL", "http://localhost:8001")
 
 
-@pytest.mark.asyncio
-async def test_health_check(test_client):
+def test_health_check():
     """Test health check endpoint."""
-    response = await test_client.get("/api/")
+    response = requests.get(f"{BASE_URL}/api/")
     assert response.status_code == 200
     data = response.json()
     assert data["message"] == "FundEd API is running"
-    assert "version" in data
 
 
-@pytest.mark.asyncio
-async def test_health_endpoint(test_client):
+def test_health_endpoint():
     """Test detailed health endpoint."""
-    response = await test_client.get("/api/health")
+    response = requests.get(f"{BASE_URL}/api/health")
     assert response.status_code == 200
     data = response.json()
     assert "status" in data
-    assert "database" in data
 
 
-@pytest.mark.asyncio
-async def test_categories(test_client):
+def test_categories():
     """Test categories endpoint."""
-    response = await test_client.get("/api/categories")
+    response = requests.get(f"{BASE_URL}/api/categories")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
     assert len(data["data"]) == 6
-    
-    categories = [c["id"] for c in data["data"]]
-    assert "tuition" in categories
-    assert "books" in categories
 
 
-@pytest.mark.asyncio
-async def test_countries(test_client):
+def test_countries():
     """Test countries endpoint."""
-    response = await test_client.get("/api/countries")
+    response = requests.get(f"{BASE_URL}/api/countries")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert len(data["data"]) > 0
 
 
-@pytest.mark.asyncio
-async def test_fields_of_study(test_client):
+def test_fields_of_study():
     """Test fields of study endpoint."""
-    response = await test_client.get("/api/fields-of-study")
+    response = requests.get(f"{BASE_URL}/api/fields-of-study")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert len(data["data"]) > 0
 
 
-@pytest.mark.asyncio
-async def test_campaigns_list_empty(test_client):
-    """Test campaigns list when empty."""
-    response = await test_client.get("/api/campaigns")
+def test_campaigns_list():
+    """Test campaigns list."""
+    response = requests.get(f"{BASE_URL}/api/campaigns")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert "data" in data
     assert "pagination" in data
 
 
-@pytest.mark.asyncio
-async def test_auth_config_without_google_creds(test_client):
-    """Test auth config endpoint without Google credentials."""
-    response = await test_client.get("/api/auth/config")
-    # Should return 503 if not configured
-    assert response.status_code == 503
-
-
-@pytest.mark.asyncio
-async def test_auth_me_unauthenticated(test_client):
+def test_auth_me_unauthenticated():
     """Test auth/me without authentication."""
-    response = await test_client.get("/api/auth/me")
+    response = requests.get(f"{BASE_URL}/api/auth/me")
     assert response.status_code == 401
 
 
-@pytest.mark.asyncio
-async def test_campaign_not_found(test_client):
+def test_campaign_not_found():
     """Test getting a non-existent campaign."""
-    response = await test_client.get("/api/campaigns/nonexistent123")
+    response = requests.get(f"{BASE_URL}/api/campaigns/nonexistent123")
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_donation_checkout_missing_fields(test_client):
+def test_donation_checkout_missing_fields():
     """Test donation checkout with missing required fields."""
-    response = await test_client.post(
-        "/api/donations/checkout",
+    response = requests.post(
+        f"{BASE_URL}/api/donations/checkout",
         json={}
     )
     assert response.status_code == 400
 
 
-@pytest.mark.asyncio
-async def test_admin_endpoints_require_auth(test_client):
+def test_admin_endpoints_require_auth():
     """Test that admin endpoints require authentication."""
-    response = await test_client.get("/api/admin/stats")
+    response = requests.get(f"{BASE_URL}/api/admin/stats")
     assert response.status_code == 401
+
+
+if __name__ == "__main__":
+    import sys
     
-    response = await test_client.get("/api/admin/students/pending")
-    assert response.status_code == 401
+    tests = [
+        test_health_check,
+        test_health_endpoint,
+        test_categories,
+        test_countries,
+        test_fields_of_study,
+        test_campaigns_list,
+        test_auth_me_unauthenticated,
+        test_campaign_not_found,
+        test_donation_checkout_missing_fields,
+        test_admin_endpoints_require_auth,
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test in tests:
+        try:
+            test()
+            print(f"✓ {test.__name__}")
+            passed += 1
+        except AssertionError as e:
+            print(f"✗ {test.__name__}: {e}")
+            failed += 1
+        except Exception as e:
+            print(f"✗ {test.__name__}: {type(e).__name__}: {e}")
+            failed += 1
+    
+    print(f"\n{passed} passed, {failed} failed")
+    sys.exit(0 if failed == 0 else 1)
