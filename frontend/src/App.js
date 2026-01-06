@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
-import Navbar from './components/Navbar';
+import Header from './components/Header';
+import Footer from './components/Footer';
 import Home from './pages/Home';
 import Browse from './pages/Browse';
 import CampaignDetail from './pages/CampaignDetail';
@@ -9,92 +10,46 @@ import CreateCampaign from './pages/CreateCampaign';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import DonateSuccess from './pages/DonateSuccess';
+import AuthCallback from './pages/AuthCallback';
 import { Toaster } from './components/ui/toaster';
+import { getCurrentUser, logout as authLogout } from './services/auth';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Auth Callback Component
-const AuthCallback = ({ onLogin }) => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const hasProcessed = React.useRef(false);
-
-  useEffect(() => {
-    if (hasProcessed.current) return;
-    hasProcessed.current = true;
-
-    const processSession = async () => {
-      const hash = location.hash;
-      if (hash.includes('session_id=')) {
-        const sessionId = hash.split('session_id=')[1].split('&')[0];
-        
-        try {
-          // Send session_id to backend to exchange for user data
-          // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-          const backendResponse = await fetch(`${API}/auth/session`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ session_id: sessionId }),
-            credentials: 'include'
-          });
-
-          if (!backendResponse.ok) throw new Error('Failed to create session');
-
-          const result = await backendResponse.json();
-          onLogin(result.data);
-          navigate('/dashboard', { state: { user: result.data }, replace: true });
-        } catch (error) {
-          console.error('Auth error:', error);
-          navigate('/login', { replace: true });
-        }
-      }
-    };
-
-    processSession();
-  }, [location, navigate, onLogin]);
-
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Authenticating...</p>
-      </div>
-    </div>
-  );
-};
-
 // Protected Route Component
-const ProtectedRoute = ({ children, user }) => {
+const ProtectedRoute = ({ children, user, setUser }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [isAuthenticated, setIsAuthenticated] = useState(location.state?.user ? true : null);
-  const [currentUser, setCurrentUser] = useState(location.state?.user || user);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    if (location.state?.user) return; // Skip if user passed from AuthCallback
-
     const checkAuth = async () => {
+      // If we already have user data, no need to check
+      if (user) {
+        setIsChecking(false);
+        return;
+      }
+
       try {
-        const response = await fetch(`${API}/auth/me`, {
-          credentials: 'include'
-        });
-        if (!response.ok) throw new Error('Not authenticated');
-        const userData = await response.json();
-        setIsAuthenticated(true);
-        setCurrentUser(userData);
+        const result = await getCurrentUser();
+        if (result?.success && result?.data) {
+          setUser(result.data);
+        } else {
+          navigate('/login', { state: { from: location.pathname } });
+        }
       } catch (error) {
-        setIsAuthenticated(false);
-        navigate('/login');
+        console.error('Auth check failed:', error);
+        navigate('/login', { state: { from: location.pathname } });
+      } finally {
+        setIsChecking(false);
       }
     };
 
     checkAuth();
-  }, [navigate, location.state]);
+  }, [user, navigate, location.pathname, setUser]);
 
-  if (isAuthenticated === null) {
+  if (isChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -102,61 +57,71 @@ const ProtectedRoute = ({ children, user }) => {
     );
   }
 
-  return isAuthenticated ? React.cloneElement(children, { user: currentUser }) : null;
+  return user ? React.cloneElement(children, { user }) : null;
 };
 
-// Router Component
-function AppRouter({ user, onLogin, onLogout }) {
-  const location = useLocation();
-
-  // Check URL fragment for session_id during render
-  if (location.hash?.includes('session_id=')) {
-    return <AuthCallback onLogin={onLogin} />;
-  }
-
+// Main Router Component
+function AppRouter({ user, setUser, onLogout }) {
   return (
-    <>
-      <Navbar user={user} onLogout={onLogout} />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/browse" element={<Browse />} />
-        <Route path="/campaign/:id" element={<CampaignDetail />} />
-        <Route path="/login" element={<Login onLogin={onLogin} />} />
-        <Route path="/donate/success" element={<DonateSuccess />} />
-        <Route
-          path="/create-campaign"
-          element={
-            <ProtectedRoute user={user}>
-              <CreateCampaign />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute user={user}>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
-    </>
+    <div className="min-h-screen flex flex-col">
+      <Header user={user} onLogout={onLogout} />
+      <main className="flex-grow">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/browse" element={<Browse />} />
+          <Route path="/campaign/:id" element={<CampaignDetail />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback onLogin={setUser} />} />
+          <Route path="/donate/success" element={<DonateSuccess />} />
+          <Route
+            path="/create-campaign"
+            element={
+              <ProtectedRoute user={user} setUser={setUser}>
+                <CreateCampaign />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute user={user} setUser={setUser}>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </main>
+      <Footer />
+    </div>
   );
 }
 
 function App() {
   const [user, setUser] = useState(null);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
 
-  const handleLogin = (userData) => {
-    setUser(userData);
-  };
+  // Check for existing session on app load
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      try {
+        const result = await getCurrentUser();
+        if (result?.success && result?.data) {
+          setUser(result.data);
+        }
+      } catch (error) {
+        // User not logged in, that's fine
+        console.log('No existing session');
+      } finally {
+        setInitialCheckDone(true);
+      }
+    };
+
+    checkExistingSession();
+  }, []);
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+      await authLogout();
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -164,10 +129,19 @@ function App() {
     window.location.href = '/';
   };
 
+  // Show loading while checking initial auth state
+  if (!initialCheckDone) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="App">
       <BrowserRouter>
-        <AppRouter user={user} onLogin={handleLogin} onLogout={handleLogout} />
+        <AppRouter user={user} setUser={setUser} onLogout={handleLogout} />
         <Toaster />
       </BrowserRouter>
     </div>
