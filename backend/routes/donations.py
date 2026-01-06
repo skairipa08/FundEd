@@ -1,13 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from datetime import datetime, timezone
 import os
-
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
-    CheckoutSessionRequest,
-    CheckoutSessionResponse,
-    CheckoutStatusResponse
-)
+import stripe
 
 from models.donation import Donation, PaymentTransaction, PaymentStatus
 from utils.auth import get_current_user
@@ -59,62 +53,74 @@ async def create_checkout(request: Request):
     if not stripe_api_key:
         raise HTTPException(status_code=500, detail="Payment service not configured")
     
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=stripe_api_key, webhook_url=webhook_url)
+    stripe.api_key = stripe_api_key
     
     # Build success and cancel URLs
     success_url = f"{origin_url}/donate/success?session_id={{CHECKOUT_SESSION_ID}}&campaign_id={campaign_id}"
     cancel_url = f"{origin_url}/campaign/{campaign_id}"
     
-    # Create checkout session
-    checkout_request = CheckoutSessionRequest(
-        amount=float(amount),
-        currency="usd",
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={
-            "campaign_id": campaign_id,
-            "donor_id": donor_id or "",
-            "donor_name": donor_name,
-            "donor_email": donor_email or "",
-            "anonymous": str(anonymous)
+    try:
+        # Create Stripe checkout session
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": f"Donation to: {campaign.get('title', 'Campaign')}",
+                            "description": f"Supporting {donor_name if not anonymous else 'a student'}'s education",
+                        },
+                        "unit_amount": int(float(amount) * 100),  # Convert to cents
+                    },
+                    "quantity": 1,
+                },
+            ],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "campaign_id": campaign_id,
+                "donor_id": donor_id or "",
+                "donor_name": donor_name,
+                "donor_email": donor_email or "",
+                "anonymous": str(anonymous)
+            }
+        )
+        
+        # Create payment transaction record
+        transaction = PaymentTransaction(
+            session_id=session.id,
+            campaign_id=campaign_id,
+            donor_id=donor_id,
+            donor_name=donor_name,
+            donor_email=donor_email,
+            amount=float(amount),
+            currency="usd",
+            anonymous=anonymous,
+            payment_status=PaymentStatus.INITIATED,
+            metadata={
+                "campaign_id": campaign_id,
+                "donor_name": donor_name,
+                "anonymous": anonymous
+            }
+        )
+        
+        transaction_dict = transaction.model_dump()
+        transaction_dict["created_at"] = transaction_dict["created_at"].isoformat()
+        transaction_dict["updated_at"] = transaction_dict["updated_at"].isoformat()
+        
+        await db.payment_transactions.insert_one(transaction_dict)
+        
+        return {
+            "success": True,
+            "data": {
+                "url": session.url,
+                "session_id": session.id
+            }
         }
-    )
-    
-    session: CheckoutSessionResponse = await stripe_checkout.create_checkout_session(checkout_request)
-    
-    # Create payment transaction record
-    transaction = PaymentTransaction(
-        session_id=session.session_id,
-        campaign_id=campaign_id,
-        donor_id=donor_id,
-        donor_name=donor_name,
-        donor_email=donor_email,
-        amount=float(amount),
-        currency="usd",
-        anonymous=anonymous,
-        payment_status=PaymentStatus.INITIATED,
-        metadata={
-            "campaign_id": campaign_id,
-            "donor_name": donor_name,
-            "anonymous": anonymous
-        }
-    )
-    
-    transaction_dict = transaction.model_dump()
-    transaction_dict["created_at"] = transaction_dict["created_at"].isoformat()
-    transaction_dict["updated_at"] = transaction_dict["updated_at"].isoformat()
-    
-    await db.payment_transactions.insert_one(transaction_dict)
-    
-    return {
-        "success": True,
-        "data": {
-            "url": session.url,
-            "session_id": session.session_id
-        }
-    }
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/status/{session_id}")
@@ -147,90 +153,94 @@ async def get_payment_status(request: Request, session_id: str):
     
     # Check with Stripe
     stripe_api_key = os.environ.get("STRIPE_API_KEY")
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=stripe_api_key, webhook_url=webhook_url)
+    if not stripe_api_key:
+        raise HTTPException(status_code=500, detail="Payment service not configured")
     
-    checkout_status: CheckoutStatusResponse = await stripe_checkout.get_checkout_status(session_id)
+    stripe.api_key = stripe_api_key
     
-    # Map Stripe status to our status
-    new_status = PaymentStatus.PENDING
-    if checkout_status.payment_status == "paid":
-        new_status = PaymentStatus.PAID
-    elif checkout_status.status == "expired":
-        new_status = PaymentStatus.EXPIRED
-    elif checkout_status.status == "complete" and checkout_status.payment_status != "paid":
-        new_status = PaymentStatus.FAILED
-    
-    # Update transaction
-    await db.payment_transactions.update_one(
-        {"session_id": session_id},
-        {"$set": {
-            "payment_status": new_status.value,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # If paid, create donation record and update campaign
-    if new_status == PaymentStatus.PAID:
-        # Check if donation already exists (prevent double processing)
-        existing_donation = await db.donations.find_one(
-            {"stripe_session_id": session_id},
-            {"_id": 0}
+    try:
+        checkout_session = stripe.checkout.Session.retrieve(session_id)
+        
+        # Map Stripe status to our status
+        new_status = PaymentStatus.PENDING
+        if checkout_session.payment_status == "paid":
+            new_status = PaymentStatus.PAID
+        elif checkout_session.status == "expired":
+            new_status = PaymentStatus.EXPIRED
+        elif checkout_session.status == "complete" and checkout_session.payment_status != "paid":
+            new_status = PaymentStatus.FAILED
+        
+        # Update transaction
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {
+                "payment_status": new_status.value,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
         )
         
-        if not existing_donation:
-            # Create donation record
-            donation = Donation(
-                campaign_id=transaction["campaign_id"],
-                donor_id=transaction.get("donor_id"),
-                donor_name=transaction.get("donor_name", "Anonymous"),
-                donor_email=transaction.get("donor_email"),
-                amount=transaction["amount"],
-                anonymous=transaction.get("anonymous", False),
-                stripe_session_id=session_id,
-                payment_status=PaymentStatus.PAID
-            )
-            
-            donation_dict = donation.model_dump()
-            donation_dict["created_at"] = donation_dict["created_at"].isoformat()
-            
-            await db.donations.insert_one(donation_dict)
-            
-            # Update campaign raised amount and donor count
-            await db.campaigns.update_one(
-                {"campaign_id": transaction["campaign_id"]},
-                {
-                    "$inc": {
-                        "raised_amount": transaction["amount"],
-                        "donor_count": 1
-                    },
-                    "$set": {
-                        "updated_at": datetime.now(timezone.utc).isoformat()
-                    }
-                }
-            )
-            
-            # Check if campaign reached target
-            campaign = await db.campaigns.find_one(
-                {"campaign_id": transaction["campaign_id"]},
+        # If paid, create donation record and update campaign
+        if new_status == PaymentStatus.PAID:
+            # Check if donation already exists (prevent double processing)
+            existing_donation = await db.donations.find_one(
+                {"stripe_session_id": session_id},
                 {"_id": 0}
             )
-            if campaign and campaign.get("raised_amount", 0) >= campaign.get("target_amount", 0):
+            
+            if not existing_donation:
+                # Create donation record
+                donation = Donation(
+                    campaign_id=transaction["campaign_id"],
+                    donor_id=transaction.get("donor_id"),
+                    donor_name=transaction.get("donor_name", "Anonymous"),
+                    donor_email=transaction.get("donor_email"),
+                    amount=transaction["amount"],
+                    anonymous=transaction.get("anonymous", False),
+                    stripe_session_id=session_id,
+                    payment_status=PaymentStatus.PAID
+                )
+                
+                donation_dict = donation.model_dump()
+                donation_dict["created_at"] = donation_dict["created_at"].isoformat()
+                
+                await db.donations.insert_one(donation_dict)
+                
+                # Update campaign raised amount and donor count
                 await db.campaigns.update_one(
                     {"campaign_id": transaction["campaign_id"]},
-                    {"$set": {"status": "completed"}}
+                    {
+                        "$inc": {
+                            "raised_amount": transaction["amount"],
+                            "donor_count": 1
+                        },
+                        "$set": {
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }
+                    }
                 )
-    
-    return {
-        "success": True,
-        "data": {
-            "status": checkout_status.status,
-            "payment_status": new_status.value,
-            "amount": transaction.get("amount"),
-            "campaign_id": transaction.get("campaign_id")
+                
+                # Check if campaign reached target
+                campaign = await db.campaigns.find_one(
+                    {"campaign_id": transaction["campaign_id"]},
+                    {"_id": 0}
+                )
+                if campaign and campaign.get("raised_amount", 0) >= campaign.get("target_amount", 0):
+                    await db.campaigns.update_one(
+                        {"campaign_id": transaction["campaign_id"]},
+                        {"$set": {"status": "completed"}}
+                    )
+        
+        return {
+            "success": True,
+            "data": {
+                "status": checkout_session.status,
+                "payment_status": new_status.value,
+                "amount": transaction.get("amount"),
+                "campaign_id": transaction.get("campaign_id")
+            }
         }
-    }
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/campaign/{campaign_id}")
