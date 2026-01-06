@@ -1,15 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Heart, Shield, TrendingUp, Users, Globe, ArrowRight, CheckCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import CampaignCard from '../components/CampaignCard';
-import { mockStudents, categories } from '../mockData';
+import { getCampaigns, getCategories } from '../services/api';
 
 const Home = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const featuredCampaigns = mockStudents.filter(s => s.verificationStatus === 'verified').slice(0, 3);
+  const [featuredCampaigns, setFeaturedCampaigns] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [campaignsRes, categoriesRes] = await Promise.all([
+          getCampaigns({ limit: 3 }),
+          getCategories()
+        ]);
+        setFeaturedCampaigns(campaignsRes.data || []);
+        setCategories(categoriesRes.data || []);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
 
   const stats = [
     { label: 'Students Funded', value: '2,500+', icon: Users },
@@ -21,6 +41,15 @@ const Home = () => {
   const handleSearch = (e) => {
     e.preventDefault();
     navigate(`/browse?search=${searchQuery}`);
+  };
+
+  const categoryIcons = {
+    tuition: '🎓',
+    books: '📚',
+    laptop: '💻',
+    housing: '🏠',
+    travel: '✈️',
+    emergency: '🚨'
   };
 
   return (
@@ -115,11 +144,17 @@ const Home = () => {
             <h2 className="text-4xl font-bold text-gray-900 mb-4">Featured Campaigns</h2>
             <p className="text-lg text-gray-600">Support verified students making a difference</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-8 mb-8">
-            {featuredCampaigns.map((student) => (
-              <CampaignCard key={student.id} student={student} />
-            ))}
-          </div>
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-3 gap-8 mb-8">
+              {featuredCampaigns.map((campaign) => (
+                <CampaignCard key={campaign.campaign_id} campaign={campaign} />
+              ))}
+            </div>
+          )}
           <div className="text-center">
             <Button
               size="lg"
@@ -150,7 +185,7 @@ const Home = () => {
               >
                 <div className="text-center">
                   <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-100 rounded-lg mb-3 group-hover:bg-blue-200 transition-colors">
-                    <div className="text-blue-600 text-2xl">📚</div>
+                    <div className="text-blue-600 text-2xl">{categoryIcons[category.id] || '📚'}</div>
                   </div>
                   <div className="font-semibold text-gray-900">{category.name}</div>
                 </div>
