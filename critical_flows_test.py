@@ -268,6 +268,38 @@ class CriticalFlowsTester:
             self.log_test("Stripe Checkout Creation", False, f"Exception: {str(e)}")
         
         # Test 2: Payment status endpoint
+        try:
+            # Test with dummy session ID - should return 404
+            dummy_session_id = "cs_test_dummy_session_id"
+            response = self.session.get(f"{self.base_url}/api/donations/status/{dummy_session_id}")
+            
+            if response.status_code == 404:
+                data = response.json()
+                if "not found" in data.get("detail", "").lower():
+                    self.log_test(
+                        "Payment Status Tracking", 
+                        True, 
+                        "Payment status endpoint working correctly",
+                        "Returns 404 for non-existent session ID"
+                    )
+                else:
+                    self.log_test(
+                        "Payment Status Tracking", 
+                        False, 
+                        "Unexpected error message for non-existent session",
+                        data.get("detail")
+                    )
+            else:
+                self.log_test(
+                    "Payment Status Tracking", 
+                    False, 
+                    f"Expected 404 for dummy session, got HTTP {response.status_code}",
+                    response.text[:200]
+                )
+        except Exception as e:
+            self.log_test("Payment Status Tracking", False, f"Exception: {str(e)}")
+        
+        # Test 2b: Payment status endpoint (if we have a real session ID)
         if hasattr(self, 'test_session_id'):
             try:
                 response = self.session.get(f"{self.base_url}/api/donations/status/{self.test_session_id}")
