@@ -1,6 +1,5 @@
 from fastapi import Request, HTTPException
 from typing import Optional
-import httpx
 from datetime import datetime, timezone
 
 
@@ -35,16 +34,18 @@ async def get_current_user(request: Request, db) -> Optional[dict]:
     # Check expiry
     expires_at = session_doc.get("expires_at")
     if isinstance(expires_at, str):
-        expires_at = datetime.fromisoformat(expires_at)
+        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     
     if expires_at < datetime.now(timezone.utc):
+        # Session expired, clean it up
+        await db.user_sessions.delete_one({"session_token": session_token})
         return None
     
     # Get user
     user_doc = await db.users.find_one(
-        {"user_id": session_doc["user_id"]},
+        {"user_id": session_doc["user_id"], "deleted": {"$ne": True}},
         {"_id": 0}
     )
     
@@ -69,19 +70,3 @@ async def require_role(request: Request, db, allowed_roles: list) -> dict:
     if user.get("role") not in allowed_roles:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return user
-
-
-async def exchange_session_id(session_id: str) -> dict:
-    """
-    Exchange session_id from Emergent Auth for user data and session_token.
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}
-        )
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session ID")
-        
-        return response.json()
