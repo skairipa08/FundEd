@@ -1,12 +1,114 @@
 from fastapi import APIRouter, Request, HTTPException
 from datetime import datetime, timezone
 from typing import Optional
+import os
 
 from models.user import UserRole, VerificationStatus, StudentProfile, StudentProfileCreate
 from utils.auth import require_role, require_auth
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
+
+# ==================== User Management ====================
+
+@router.get("/users")
+async def list_users(request: Request, role: Optional[str] = None, page: int = 1, limit: int = 50):
+    """
+    List all users with optional role filter.
+    """
+    db = request.app.state.db
+    await require_role(request, db, ["admin"])
+    
+    query = {}
+    if role:
+        query["role"] = role
+    
+    skip = (page - 1) * limit
+    users = await db.users.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    total = await db.users.count_documents(query)
+    
+    return {
+        "success": True,
+        "data": users,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total
+        }
+    }
+
+
+@router.put("/users/{user_id}/role")
+async def update_user_role(request: Request, user_id: str):
+    """
+    Update a user's role. Can promote to admin or demote.
+    """
+    db = request.app.state.db
+    admin = await require_role(request, db, ["admin"])
+    
+    body = await request.json()
+    new_role = body.get("role")
+    
+    if new_role not in ["donor", "student", "admin", "institution"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    
+    # Prevent self-demotion
+    if user_id == admin["user_id"] and new_role != "admin":
+        raise HTTPException(status_code=400, detail="Cannot demote yourself")
+    
+    # Check user exists
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "role": new_role,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {
+        "success": True,
+        "message": f"User role updated to {new_role}"
+    }
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(request: Request, user_id: str):
+    """
+    Delete a user account. Soft delete by setting deleted flag.
+    """
+    db = request.app.state.db
+    admin = await require_role(request, db, ["admin"])
+    
+    if user_id == admin["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Soft delete
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "deleted": True,
+            "deleted_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Delete sessions
+    await db.user_sessions.delete_many({"user_id": user_id})
+    
+    return {
+        "success": True,
+        "message": "User deleted"
+    }
+
+
+# ==================== Student Verification ====================
 
 @router.get("/students/pending")
 async def list_pending_students(request: Request):
@@ -16,21 +118,16 @@ async def list_pending_students(request: Request):
     db = request.app.state.db
     await require_role(request, db, ["admin"])
     
-    # Get all pending student profiles
     pending_profiles = await db.student_profiles.find(
         {"verification_status": "pending"},
         {"_id": 0}
     ).to_list(100)
     
-    # Enrich with user data
     enriched = []
     for profile in pending_profiles:
         user = await db.users.find_one({"user_id": profile["user_id"]}, {"_id": 0})
         if user:
-            enriched.append({
-                **profile,
-                "user": user
-            })
+            enriched.append({**profile, "user": user})
     
     return {
         "success": True,
@@ -52,15 +149,11 @@ async def list_all_students(request: Request, status: Optional[str] = None):
     
     profiles = await db.student_profiles.find(query, {"_id": 0}).to_list(500)
     
-    # Enrich with user data
     enriched = []
     for profile in profiles:
         user = await db.users.find_one({"user_id": profile["user_id"]}, {"_id": 0})
         if user:
-            enriched.append({
-                **profile,
-                "user": user
-            })
+            enriched.append({**profile, "user": user})
     
     return {
         "success": True,
@@ -77,29 +170,31 @@ async def verify_student(request: Request, user_id: str):
     await require_role(request, db, ["admin"])
     
     body = await request.json()
-    action = body.get("action")  # "approve" or "reject"
+    action = body.get("action")
+    reason = body.get("reason", "")
     
     if action not in ["approve", "reject"]:
         raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
     
-    # Get student profile
     profile = await db.student_profiles.find_one({"user_id": user_id}, {"_id": 0})
-    
     if not profile:
         raise HTTPException(status_code=404, detail="Student profile not found")
     
     new_status = "verified" if action == "approve" else "rejected"
     
-    # Update profile
+    update_data = {
+        "verification_status": new_status,
+        "verified_at": datetime.now(timezone.utc).isoformat() if action == "approve" else None,
+        "rejection_reason": reason if action == "reject" else None,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
     await db.student_profiles.update_one(
         {"user_id": user_id},
-        {"$set": {
-            "verification_status": new_status,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
+        {"$set": update_data}
     )
     
-    # If approved, also mark documents as verified
+    # Mark documents as verified if approved
     if action == "approve" and profile.get("verification_documents"):
         docs = profile["verification_documents"]
         for doc in docs:
@@ -115,6 +210,8 @@ async def verify_student(request: Request, user_id: str):
     }
 
 
+# ==================== Campaign Management ====================
+
 @router.get("/campaigns")
 async def list_all_campaigns(request: Request, status: Optional[str] = None):
     """
@@ -129,7 +226,6 @@ async def list_all_campaigns(request: Request, status: Optional[str] = None):
     
     campaigns = await db.campaigns.find(query, {"_id": 0}).to_list(500)
     
-    # Enrich with student data
     enriched = []
     for campaign in campaigns:
         student = await db.users.find_one({"user_id": campaign["student_id"]}, {"_id": 0})
@@ -146,6 +242,42 @@ async def list_all_campaigns(request: Request, status: Optional[str] = None):
     }
 
 
+@router.put("/campaigns/{campaign_id}/status")
+async def update_campaign_status(request: Request, campaign_id: str):
+    """
+    Update campaign status (suspend/activate/cancel).
+    """
+    db = request.app.state.db
+    await require_role(request, db, ["admin"])
+    
+    body = await request.json()
+    new_status = body.get("status")
+    reason = body.get("reason", "")
+    
+    if new_status not in ["active", "suspended", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    
+    campaign = await db.campaigns.find_one({"campaign_id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    await db.campaigns.update_one(
+        {"campaign_id": campaign_id},
+        {"$set": {
+            "status": new_status,
+            "status_reason": reason,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {
+        "success": True,
+        "message": f"Campaign status updated to {new_status}"
+    }
+
+
+# ==================== Platform Statistics ====================
+
 @router.get("/stats")
 async def get_platform_stats(request: Request):
     """
@@ -154,22 +286,19 @@ async def get_platform_stats(request: Request):
     db = request.app.state.db
     await require_role(request, db, ["admin"])
     
-    # Count users by role
-    total_users = await db.users.count_documents({})
-    total_students = await db.users.count_documents({"role": "student"})
-    total_donors = await db.users.count_documents({"role": "donor"})
+    total_users = await db.users.count_documents({"deleted": {"$ne": True}})
+    total_students = await db.users.count_documents({"role": "student", "deleted": {"$ne": True}})
+    total_donors = await db.users.count_documents({"role": "donor", "deleted": {"$ne": True}})
+    total_admins = await db.users.count_documents({"role": "admin", "deleted": {"$ne": True}})
     
-    # Student verification stats
     pending_verifications = await db.student_profiles.count_documents({"verification_status": "pending"})
     verified_students = await db.student_profiles.count_documents({"verification_status": "verified"})
     rejected_students = await db.student_profiles.count_documents({"verification_status": "rejected"})
     
-    # Campaign stats
     total_campaigns = await db.campaigns.count_documents({})
     active_campaigns = await db.campaigns.count_documents({"status": "active"})
     completed_campaigns = await db.campaigns.count_documents({"status": "completed"})
     
-    # Donation stats
     pipeline = [
         {"$match": {"payment_status": "paid"}},
         {"$group": {
@@ -189,7 +318,8 @@ async def get_platform_stats(request: Request):
             "users": {
                 "total": total_users,
                 "students": total_students,
-                "donors": total_donors
+                "donors": total_donors,
+                "admins": total_admins
             },
             "verifications": {
                 "pending": pending_verifications,
@@ -209,7 +339,8 @@ async def get_platform_stats(request: Request):
     }
 
 
-# Student profile endpoints (accessible by students)
+# ==================== Student Profile (Non-Admin) ====================
+
 @router.post("/students/profile", tags=["Students"])
 async def create_student_profile(request: Request, profile_data: StudentProfileCreate):
     """
@@ -218,12 +349,10 @@ async def create_student_profile(request: Request, profile_data: StudentProfileC
     db = request.app.state.db
     user = await require_auth(request, db)
     
-    # Check if profile already exists
     existing = await db.student_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Student profile already exists")
     
-    # Create profile
     profile = StudentProfile(
         user_id=user["user_id"],
         country=profile_data.country,
@@ -238,7 +367,6 @@ async def create_student_profile(request: Request, profile_data: StudentProfileC
     
     await db.student_profiles.insert_one(profile_dict)
     
-    # Update user role to student
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$set": {
