@@ -120,11 +120,18 @@ async def seed_admin_account():
         logging.info("Admin account already exists")
 
 
-# CORS middleware
+# CORS middleware - must allow specific origin when credentials are included
+frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+cors_origins = [
+    frontend_url,
+    "http://localhost:3000",
+    "https://funded.preview.emergentagent.com"
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
