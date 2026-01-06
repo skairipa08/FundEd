@@ -63,7 +63,6 @@ async def create_session(request: Request, response: Response):
         user_dict["created_at"] = user_dict["created_at"].isoformat()
         user_dict["updated_at"] = user_dict["updated_at"].isoformat()
         await db.users.insert_one(user_dict)
-        role = "donor"
     
     # Create session
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
